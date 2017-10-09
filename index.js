@@ -5,11 +5,13 @@ var tmp = require('tmp');
 var fs = require('fs');
 var path = require('path');
 var exec = require('child_process').execSync;
-
+var spawnSync = require('child_process').spawnSync;
 var prefix="diagram";
 var cmd = externalTool("mmdc");
+var inkscape = where("inkscape.exe")
 var imgur = externalTool("imgur");
 var counter = 0;
+
 function mermaid(type, value, format, meta) {
     if (type != "CodeBlock") return null;
     var attrs = value[0],
@@ -34,8 +36,9 @@ function mermaid(type, value, format, meta) {
     fs.writeFileSync(tmpfileObj.name, content);
     var outdir = options.loc !== 'imgur' ? options.loc : path.dirname(tmpfileObj.name);
     // console.log(outdir);
-    var savePath = tmpfileObj.name + "." + options.format
-    var newPath = path.join(outdir, `${prefix}-${counter}.${options.format}`);
+    var format = options.format === 'emf' ? 'svg' : options.format
+    var savePath = `${tmpfileObj.name}.${format}`;
+    var newPath = path.join(outdir, `${prefix}-${counter}.${format}`);
     var fullCmd = `${cmd}  -w ${options.width} -i ${tmpfileObj.name} -o ${savePath}`
     // console.log(fullCmd, savePath)
     exec(fullCmd);
@@ -58,9 +61,16 @@ function mermaid(type, value, format, meta) {
             .trim()
             .replace("http://", "https://");
     else {
-        mv(savePath, newPath);
+        if (options.format === 'emf') {
+            var saveEmfPath = `${tmpfileObj.name}.emf`;
+            var newEmfPath = path.join(outdir, `${prefix}-${counter}.emf`);                   
+            var convertCmd = `"${inkscape}" --file "${savePath}" --export-emf "${newEmfPath}"`
+            exec(convertCmd);   
+            newPath = newEmfPath;
+        } else {
+            mv(savePath, newPath);            
+        }
     }
-
 
     return pandoc.Para(
         [
@@ -81,13 +91,29 @@ function externalTool(command) {
             process.exit(1);
         });
 }
+
+function where(command) {
+    var isWin = require('os').platform().indexOf('win') > -1;
+    var where = isWin ? 'where' : 'whereis';
+    // var process = require('process');
+    var result = spawnSync("cmd.exe", ['/c', 'where', command], {env: process.env, stdio: 'pipe', encoding: 'utf-8'});
+    if (result.output[2] === '')
+        return result.output[1].trim();
+    else
+        return null;
+}
+
 function mv(from, to) {
     var readStream = fs.createReadStream(from)
     var writeStream = fs.createWriteStream(to);
 
     readStream.pipe(writeStream);
 
-    fs.unlinkSync(from);
+    rm(from);
+}
+
+function rm(file) {
+    fs.unlinkSync(file);
 }
 
 function firstExisting(paths, error) {
